@@ -339,7 +339,8 @@ def contains_l3_in_l2(text, l3, l2):
 
 
 def get_section_text(text, level, heading, top=False):
-    """Gets the text under the specified heading.
+    """Gets the text under the specified heading (first heading that matches
+    the given level and heading).
 
     Parameters
     ----------
@@ -649,6 +650,28 @@ def remove_links(text):
     return res
 
 
+def extract_headings_(text):
+    lines = text.split('\n')
+    leftover = []
+    for line_ in lines:
+        if line_ and line_[-1] == "\r":
+            line = line_[:-1]
+        else:
+            line = line_
+        heading = None
+        if line.startswith("=") and line.endswith("="):
+            heading = parse_heading(line)
+        if heading is None:
+            leftover.append(line)
+        else:
+            if leftover:
+                yield "\n".join(leftover)
+            leftover = []
+            yield heading
+    if leftover:
+        yield "\n".join(leftover)
+
+
 def parse_wikitext(text):
     """Parses wikitext and yields sections.
 
@@ -665,25 +688,12 @@ def parse_wikitext(text):
     start = 0
     textstart = 0
     while True:
-        specialstart = _minfind(text, ["[[", "{{", "\n="], start)
+        specialstart = _minfind(text, ["[[", "{{"], start)
         if specialstart is None:
             break
-        if specialstart[1] == "\n=":
-            line = text[specialstart[0] :]
-            if "\n" in line:
-                line = line[: line.find("\n")]
-            heading = parse_heading(line)
-            if heading is None:
-                start = specialstart[0] + len(specialstart[1])
-                continue
-            else:
-                if specialstart[0] > textstart:
-                    yield text[textstart : specialstart[0]]
-                yield heading
-                start = specialstart[0] + 2 + len(line)
-        elif specialstart[1] == "[[":
+        if specialstart[1] == "[[":
             if specialstart[0] > textstart:
-                yield text[textstart : specialstart[0]]
+                yield from extract_headings_(text[textstart : specialstart[0]])
             depth = 1
             lookstart = specialstart[0] + len(specialstart[1])
             linkstart = specialstart[0]
@@ -704,7 +714,7 @@ def parse_wikitext(text):
                 yield parse_internal_link(text[linkstart:linkend])
         elif specialstart[1] == "{{":
             if specialstart[0] > textstart:
-                yield text[textstart : specialstart[0]]
+                yield from extract_headings_(text[textstart : specialstart[0]])
             depth = 1
             lookstart = specialstart[0] + len(specialstart[1])
             tempstart = specialstart[0]
@@ -724,7 +734,7 @@ def parse_wikitext(text):
             if tempend > tempstart:
                 yield parse_template(text[tempstart:tempend])
     if textstart < len(text):
-        yield text[textstart:]
+        yield from extract_headings_(text[textstart:])
 
 
 def _find_templates_raw(text):
