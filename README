@@ -1,0 +1,5 @@
+A simple low-level wikitext parsing library for Python 3. The repository is
+currently barebones, but the library should mostly work, with some caveats.
+Documentation is provided in the form of docstrings.
+
+
