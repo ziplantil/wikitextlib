@@ -20,6 +20,11 @@ def _re_escape(x):
     )
 
 
+def _safefind(haystack, needle, start = 0, end = False):
+    f = haystack.find(needle, start)
+    return len(haystack) if f < 0 else f + len(needle) if end else f
+
+
 # a function that returns the first match of any needle in a haystack
 def _minfind(haystack, needles, index=0):
     t = "|".join(_re_escape(n) for n in needles)
@@ -123,6 +128,25 @@ class Template(_Template):
     pass
 
 
+def _remove_extra(text):
+    result = ""
+    lookstart = 0
+    lentext = len(text)
+    while lookstart < lentext:
+        fd = _minfind(text, ("<!--", "<nowiki>"), lookstart)
+        if fd:
+            result += text[lookstart : fd[0]]
+            lookstart = fd[0] + len(fd[1])
+            if fd[1] == "<!--":
+                lookstart = _safefind(text, "-->", lookstart, True)
+            elif fd[1] == "<nowiki>":
+                lookstart = _safefind(text, "</nowiki>", lookstart, True)
+        else:
+            break
+    result += text[lookstart :]
+    return result
+
+
 def iterate_pages_in_xml(xml):
     """
     Parses a MediaWiki XML dump and gives out all of the pages that can be
@@ -218,6 +242,7 @@ def contains_heading(text, level, heading):
     """
     if level < 1 or level > MAXIMUM_HEADING_LEVEL:
         raise ValueError("invalid value for heading level")
+    text = _remove_extra(text)
     matching = "=" * level
     for line in text.splitlines():
         line = line.rstrip()
@@ -322,6 +347,7 @@ def contains_l3_in_l2(text, l3, l2):
     """
     matching2 = "=" * 2
     matching3 = "=" * 3
+    text = _remove_extra(text)
     in_l2 = False
     for line in text.splitlines():
         line = line.rstrip()
@@ -366,6 +392,7 @@ def get_section_text(text, level, heading, top=False):
     """
     if level < 1 or level > MAXIMUM_HEADING_LEVEL:
         raise ValueError("invalid value for heading level")
+    text = _remove_extra(text)
     lines = text.splitlines()
     start_line, end_line = None, None
     for i, line in enumerate(lines):
@@ -423,6 +450,7 @@ def iterate_headings(text, level):
     lastindex = -1
     lasttitle = None
     index = -1
+    text = _remove_extra(text)
     lines = text.splitlines()
     l2 = "=" * level
     l3 = l2 + "="
@@ -614,6 +642,7 @@ def find_internal_links(text):
         All internal links. This includes media embeds and everything else
         that uses the [[...]] syntax.
     """
+    text = _remove_extra(text)
     for linkstart, linkend in _find_internal_links_raw(text + " "):
         if linkend > linkstart:
             yield parse_internal_link(text[linkstart:linkend])
@@ -640,6 +669,7 @@ def remove_links(text):
     """
     res = ""
     lastptr = 0
+    text = _remove_extra(text)
     for linkstart, linkend in _find_internal_links_raw(text + " "):
         res += text[lastptr:linkstart]
         if linkend > linkstart:
@@ -687,6 +717,7 @@ def parse_wikitext(text):
     """
     start = 0
     textstart = 0
+    text = _remove_extra(text)
     while True:
         specialstart = _minfind(text, ["[[", "{{"], start)
         if specialstart is None:
@@ -732,7 +763,7 @@ def parse_wikitext(text):
             start = tempend
             textstart = start
             if tempend > tempstart:
-                yield parse_template(text[tempstart:tempend])
+                yield parse_template_(text[tempstart:tempend])
     if textstart < len(text):
         yield from extract_headings_(text[textstart:])
 
@@ -858,9 +889,10 @@ def find_templates(text):
     Template
         All template invocations in the specified wikitext.
     """
+    text = _remove_extra(text)
     for tempstart, tempend in _find_templates_raw(text + " "):
         if tempend > tempstart + 2:
-            yield parse_template(text[tempstart:tempend])
+            yield parse_template_(text[tempstart:tempend])
 
 
 iterate_templates = find_templates
@@ -884,9 +916,10 @@ def find_templates_by_name(text, name):
         All template invocations for the template of the given name in
         the specified wikitext.
     """
+    text = _remove_extra(text)
     for tempstart, tempend in _find_templates_raw(text + " "):
         if tempend > tempstart + 2:
-            template = parse_template(text[tempstart:tempend])
+            template = parse_template_(text[tempstart:tempend])
             if template.name == name:
                 yield template
 
@@ -915,11 +948,12 @@ def replace_templates(text, replace_function):
     str
         The wikitext with all template invocations replaced.
     """
+    text = _remove_extra(text)
     result, i = "", 0
     for tempstart, tempend in _find_templates_raw(text + " "):
         if tempend > tempstart + 2:
             result += text[i:tempstart]
-            template = parse_template(text[tempstart:tempend])
+            template = parse_template_(text[tempstart:tempend])
             value = replace_function(template)
             if value is ...:
                 value = template.src
@@ -1026,10 +1060,12 @@ def parse_template(text):
     parind = 0
     for k, v in pars[1:]:
         if k is not None:
+            k = k.strip()
+            v = v.strip()
             if k in parsed.keys():
                 warnings.warn(
-                    f"duplicate parameter {spl[0]}: {j} to replace"
-                    + f" existing {spl[0]}={parsed[spl[0]]}",
+                    f"duplicate parameter {k}: {v} to replace"
+                    + f" existing {k}={parsed[k]}",
                     WikitextWarning,
                 )
             parsed[k] = v
@@ -1037,6 +1073,14 @@ def parse_template(text):
             parind += 1
             parsed[parind] = v
     return Template(rtext, pars[0][1].strip(), parsed)
+
+
+def parse_template_(text):
+    template = parse_template(text)
+    if template is None:
+        raise ValueError("internal error; cannot get template from <"
+            + text + ">")
+    return template
 
 
 def make_template(name, args, num_first=False):
